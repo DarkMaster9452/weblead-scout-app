@@ -1,0 +1,30 @@
+{
+  "name": "weblead-scout-backend",
+  "version": "1.0.0",
+  "description": "Backend API for WebLead Scout - web lead finding and generation tool",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "node --version",
+    "start": "node api/index.js",
+    "deploy": "vercel deploy"
+  },
+  "keywords": [
+    "web-development",
+    "leads",
+    "prospecting",
+    "api"
+  ],
+  "author": "Martin Straňanek",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.28.0",
+    "@google/generative-ai": "^0.21.0",
+    "@neondatabase/serverless": "^0.10.0"
+  },
+  "devDependencies": {
+    "vercel": "^35.0.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

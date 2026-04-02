@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebLead Scout</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg0:#08090f;--bg1:#0b0c14;--bg2:#0e1018;--bg3:#111420;
+  --border:#151825;--border2:#1e2235;
+  --text:#dde1ef;--muted:#64748b;--dim:#3a3f55;--faint:#2e3347;
+  --green:#00d4aa;--blue:#38bdf8;--purple:#818cf8;
+  --amber:#fbbf24;--red:#f87171;--emerald:#34d399;--violet:#a78bfa;
+}
+body{background:var(--bg0);color:var(--text);font-family:'Outfit',system-ui,sans-serif;min-height:100vh;overflow:hidden}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+input,textarea,select{font-family:inherit;font-size:14px;outline:none}
+button{font-family:'Outfit',sans-serif;cursor:pointer}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.spinner{width:14px;height:14px;border:2px solid var(--border2);border-top-color:currentColor;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0}
+.card-anim{animation:fadeUp .35s ease forwards}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+var h = React.createElement;
+var useState = React.useState;
+var useEffect = React.useEffect;
+var useRef = React.useRef;
+var useCallback = React.useCallback;
+
+// ── API helpers ─────────────────────────────────────────────────────────────
+
+async function apiPost(path, body) {
+  var res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  var data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.message || "API error " + res.status);
+  return data;
+}
+
+async function apiGet(path) {
+  var res = await fetch(path);
+  var data = await res.json();
+  if (!res.ok) throw new Error(data.error || "API error " + res.status);
+  return data;
+}
+
+async function apiPatch(path, body) {
+  var res = await fetch(path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  var data = await res.json();
+  if (!res.ok) throw new Error(data.error || "API error " + res.status);
+  return data;
+}
+
+// ── Colors ──────────────────────────────────────────────────────────────────
+
+var C = {
+  bg0:"#08090f",bg1:"#0b0c14",bg2:"#0e1018",bg3:"#111420",
+  border:"#151825",border2:"#1e2235",
+  text:"#dde1ef",muted:"#64748b",dim:"#3a3f55",faint:"#2e3347",
+  green:"#00d4aa",blue:"#38bdf8",purple:"#818cf8",
+  amber:"#fbbf24",red:"#f87171",emerald:"#34d399",violet:"#a78bfa"
+};
+
+// ── Small components ────────────────────────────────────────────────────────
+
+function ScoreBar(p) {
+  var color = p.score < 30 ? C.red : p.score < 60 ? C.amber : C.emerald;
+  return h("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+    h("div", { style: { flex: 1, height: 5, background: C.bg3, borderRadius: 3, overflow: "hidden" } },
+      h("div", { style: { width: p.score + "%", height: "100%", background: color, borderRadius: 3, transition: "width .5s" } })
+    ),
+    h("span", { style: { fontSize: 11, color: color, fontFamily: "JetBrains Mono,monospace", fontWeight: 600, minWidth: 24 } }, p.score)
+  );
+}
+
+function Badge(p) {
+  var map = {
+    "new":        { label: "New",          bg: "rgba(100,116,139,0.15)", color: C.muted },
+    "needs-site": { label: "Needs Site",   bg: "rgba(248,113,113,0.12)", color: C.red },
+    "generating": { label: "Building...",  bg: "rgba(129,140,248,0.12)", color: C.purple },
+    "generated":  { label: "Generated",    bg: "rgba(52,211,153,0.12)",  color: C.emerald },
+    "emailed":    { label: "Email Drafted", bg: "rgba(56,189,248,0.12)", color: C.blue },
+    "proposal":   { label: "Proposal",     bg: "rgba(167,139,250,0.12)", color: C.violet },
+    "saved":      { label: "Saved to DB",  bg: "rgba(0,212,170,0.12)",  color: C.green }
+  };
+  var cfg = map[p.status] || map["new"];
+  return h("span", { style: {
+    padding: "3px 9px", borderRadius: 5, fontSize: 10, fontFamily: "JetBrains Mono,monospace",
+    fontWeight: 600, color: cfg.color, background: cfg.bg, whiteSpace: "nowrap", letterSpacing: "0.03em"
+  } }, cfg.label);
+}
+
+function AiBadge(p) {
+  var isC = p.engines.indexOf("claude") >= 0;
+  var isG = p.engines.indexOf("gemini") >= 0;
+  return h("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+    isC ? h("span", { style: { fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "rgba(0,212,170,0.1)", color: C.green, fontFamily: "JetBrains Mono,monospace", fontWeight: 600 } }, "Claude") : null,
+    isG ? h("span", { style: { fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "rgba(56,189,248,0.1)", color: C.blue, fontFamily: "JetBrains Mono,monospace", fontWeight: 600 } }, "Gemini") : null
+  );
+}
+
+function Btn(p) {
+  var base = {
+    padding: p.small ? "6px 10px" : "9px 14px",
+    borderRadius: 7, border: "none", fontSize: p.small ? 11 : 12,
+    fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center",
+    justifyContent: "center", gap: 6, transition: "all .15s", opacity: p.disabled ? 0.4 : 1,
+    pointerEvents: p.disabled ? "none" : "auto"
+  };
+  var variants = {
+    green:   { background: C.green,  color: C.bg0 },
+    blue:    { background: C.blue,   color: C.bg0 },
+    purple:  { background: C.purple, color: "#fff" },
+    ghost:   { background: "transparent", color: C.muted, border: "1px solid " + C.border2 },
+    red:     { background: C.red, color: "#fff" },
+    amber:   { background: C.amber, color: C.bg0 }
+  };
+  var vs = variants[p.variant || "ghost"] || variants.ghost;
+  return h("button", Object.assign({}, { style: Object.assign({}, base, vs, p.style || {}), onClick: p.onClick, disabled: p.disabled }), p.children);
+}
+
+// ── Categories ──────────────────────────────────────────────────────────────
+
+var CATEGORIES = [
+  { key: "restaurants", label: "Restauracie" },
+  { key: "salons", label: "Kadernicky" },
+  { key: "auto_repair", label: "Autoservisy" },
+  { key: "plumbing", label: "Instalaterstvo" },
+  { key: "construction", label: "Stavebnictvo" },
+  { key: "dental", label: "Zubari" },
+  { key: "fitness", label: "Fitnescentra" },
+  { key: "accommodation", label: "Ubytovacie" },
+  { key: "retail", label: "Obchody" },
+  { key: "sports_clubs", label: "Sportove kluby" }
+];
+
+// ── Business Card ───────────────────────────────────────────────────────────
+
+function BizCard(p) {
+  var biz = p.biz;
+  var actions = [];
+
+  // Generate site
+  if (biz.websiteScore < 60 && biz.status !== "generating" && biz.status !== "generated") {
+    actions.push(h(Btn, { key: "gen", variant: "green", small: true, onClick: function() { p.onGenerate(biz); } }, "Generate Site"));
+  }
+  if (biz.status === "generating") {
+    actions.push(h("div", { key: "building", style: { display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "rgba(129,140,248,0.08)", borderRadius: 7, fontSize: 11, color: C.purple } }, h("span", { className: "spinner", style: { borderTopColor: C.purple } }), "Building..."));
+  }
+  if (biz.generatedHtml) {
+    actions.push(h(Btn, { key: "preview", variant: "ghost", small: true, onClick: function() { p.onPreview(biz); } }, "Preview"));
+    actions.push(h(Btn, { key: "dl", variant: "ghost", small: true, onClick: function() { p.onDownload(biz); } }, "HTML"));
+  }
+  // Draft email
+  actions.push(h(Btn, { key: "email", variant: "blue", small: true, disabled: biz._emailLoading, onClick: function() { p.onEmail(biz); } },
+    biz._emailLoading ? [h("span", { key: "sp", className: "spinner", style: { borderTopColor: C.blue } }), "..."] : "Draft Email"
+  ));
+  // Proposal
+  actions.push(h(Btn, { key: "prop", variant: "purple", small: true, disabled: biz._proposalLoading, onClick: function() { p.onProposal(biz); } },
+    biz._proposalLoading ? [h("span", { key: "sp", className: "spinner", style: { borderTopColor: C.purple } }), "..."] : "Proposal"
+  ));
+  // Save
+  if (!biz.savedToDb) {
+    actions.push(h(Btn, { key: "save", variant: "ghost", small: true, disabled: biz._saving, onClick: function() { p.onSave(biz); } },
+      biz._saving ? [h("span", { key: "sp", className: "spinner" }), "..."] : "Save to DB"
+    ));
+  }
+
+  return h("div", { className: "card-anim", style: {
+    background: C.bg1, border: "1px solid " + C.border, borderRadius: 14,
+    padding: 16, display: "flex", flexDirection: "column", gap: 10,
+    transition: "border-color .2s, box-shadow .2s"
+  } },
+    // Header
+    h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 } },
+      h("div", { style: { flex: 1, minWidth: 0 } },
+        h("div", { style: { fontWeight: 700, fontSize: 15, lineHeight: 1.3 } }, biz.name),
+        h("div", { style: { fontSize: 12, color: C.muted, marginTop: 2 } }, biz.category)
+      ),
+      h("div", { style: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 } },
+        h(Badge, { status: biz.status }),
+        h(AiBadge, { engines: biz.foundBy || ["claude"] })
+      )
+    ),
+    // Score
+    h(ScoreBar, { score: biz.websiteScore }),
+    // Meta
+    h("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+      biz.address ? h("div", { style: { fontSize: 12, color: C.muted, display: "flex", gap: 5 } }, h("span", null, "\ud83d\udccd"), biz.address) : null,
+      biz.phone ? h("div", { style: { fontSize: 12, color: C.muted, display: "flex", gap: 5 } }, h("span", null, "\ud83d\udcde"), biz.phone) : null,
+      biz.website
+        ? h("div", { style: { fontSize: 12, color: C.dim, display: "flex", gap: 5 } }, h("span", null, "\ud83d\udd17"),
+            h("a", { href: biz.website, target: "_blank", rel: "noreferrer", style: { color: C.dim, textDecoration: "none", fontSize: 11 } },
+              biz.website.replace(/^https?:\/\//, "").slice(0, 35)))
+        : h("div", { style: { fontSize: 11, color: C.faint } }, "No website")
+    ),
+    // Issues
+    biz.websiteIssues && biz.websiteIssues.length > 0
+      ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: 4 } },
+          biz.websiteIssues.slice(0, 5).map(function(iss, i) {
+            return h("span", { key: i, style: { fontSize: 10, color: C.muted, background: C.bg3, padding: "2px 7px", borderRadius: 4, border: "1px solid " + C.border2 } }, iss);
+          })
+        )
+      : null,
+    // Actions
+    h("div", { style: { display: "flex", flexWrap: "wrap", gap: 5, marginTop: 2 } }, actions)
+  );
+}
+
+// ── Log Panel ───────────────────────────────────────────────────────────────
+
+function LogPanel(p) {
+  var ref = useRef(null);
+  useEffect(function() { if (ref.current) ref.current.scrollTop = 0; }, [p.logs.length]);
+
+  var typeColors = { system: "#6366f1", info: C.muted, search: "#38bdf8", success: C.emerald, error: C.red, warn: C.amber, dim: C.faint };
+
+  return h("div", { style: {
+    background: C.bg1, borderTop: "1px solid " + C.border, height: 160, display: "flex", flexDirection: "column", flexShrink: 0
+  } },
+    h("div", { style: { padding: "6px 16px", borderBottom: "1px solid " + C.border, display: "flex", alignItems: "center", gap: 8, background: C.bg2 } },
+      h("span", { style: { fontSize: 10, color: C.dim, fontFamily: "JetBrains Mono,monospace", letterSpacing: "0.08em" } }, "LIVE LOG"),
+      h("span", { style: { marginLeft: "auto", fontSize: 10, color: C.faint, fontFamily: "JetBrains Mono,monospace" } }, p.logs.length + " entries"),
+      h("button", { onClick: p.onClear, style: { marginLeft: 10, fontSize: 10, background: "transparent", border: "1px solid " + C.border2, color: C.dim, borderRadius: 4, padding: "2px 8px", cursor: "pointer" } }, "clear")
+    ),
+    h("div", { ref: ref, style: { overflowY: "auto", flex: 1, padding: "6px 16px", fontFamily: "JetBrains Mono,monospace", fontSize: 11 } },
+      p.logs.length === 0
+        ? h("div", { style: { color: C.faint, marginTop: 6 } }, "Waiting for activity...")
+        : p.logs.map(function(l, i) {
+            return h("div", { key: i, style: { display: "flex", gap: 10, marginBottom: 2, lineHeight: 1.5 } },
+              h("span", { style: { color: C.faint, flexShrink: 0, userSelect: "none" } }, l.time),
+              h("span", { style: { color: typeColors[l.type] || C.muted, whiteSpace: "pre-wrap", wordBreak: "break-word" } }, l.msg)
+            );
+          })
+    )
+  );
+}
+
+// ── Modals ───────────────────────────────────────────────────────────────────
+
+function ModalWrap(p) {
+  return h("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, animation: "fadeIn .2s" } },
+    h("div", { style: { width: "100%", maxWidth: p.width || 800, maxHeight: "88vh", background: C.bg1, borderRadius: 16, border: "1px solid " + C.border2, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.6)" } },
+      h("div", { style: { padding: "14px 20px", borderBottom: "1px solid " + C.border, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 } },
+        h("span", { style: { fontSize: 15, fontWeight: 600 } }, p.title),
+        h("button", { onClick: p.onClose, style: { background: "none", border: "none", color: C.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 } }, "\u00d7")
+      ),
+      h("div", { style: { flex: 1, overflow: "auto", padding: 20 } }, p.children),
+      p.footer ? h("div", { style: { padding: "12px 20px", borderTop: "1px solid " + C.border, display: "flex", gap: 8 } }, p.footer) : null
+    )
+  );
+}
+
+function PreviewModal(p) {
+  return h(ModalWrap, { title: "Preview \u2014 " + p.biz.name, width: 960, onClose: p.onClose,
+    footer: [
+      h(Btn, { key: "dl", variant: "green", onClick: function() {
+        var blob = new Blob([p.biz.generatedHtml], { type: "text/html" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a"); a.href = url; a.download = p.biz.name.replace(/\s+/g, "_") + ".html"; a.click();
+        URL.revokeObjectURL(url);
+      } }, "Download HTML"),
+      h(Btn, { key: "close", variant: "ghost", onClick: p.onClose }, "Close")
+    ]
+  },
+    h("iframe", { srcDoc: p.biz.generatedHtml, style: { width: "100%", height: "60vh", border: "none", borderRadius: 8, background: "#fff" }, sandbox: "allow-scripts" })
+  );
+}
+
+function EmailModal(p) {
+  var subRef = useRef(null);
+  var bodyRef = useRef(null);
+
+  return h(ModalWrap, { title: "Email Draft \u2014 " + p.biz.name, width: 700, onClose: p.onClose,
+    footer: [
+      h(Btn, { key: "copy", variant: "green", onClick: function() {
+        var text = "Subject: " + (subRef.current ? subRef.current.value : p.email.subject) + "\n\n" + (bodyRef.current ? bodyRef.current.value : p.email.body);
+        navigator.clipboard.writeText(text);
+        p.onLog("Email copied to clipboard", "success");
+      } }, "Copy All"),
+      h(Btn, { key: "gmail", variant: "blue", onClick: function() {
+        var s = encodeURIComponent(subRef.current ? subRef.current.value : p.email.subject);
+        var b = encodeURIComponent(bodyRef.current ? bodyRef.current.value : p.email.body);
+        window.open("https://mail.google.com/mail/?view=cm&su=" + s + "&body=" + b, "_blank");
+      } }, "Open in Gmail"),
+      h(Btn, { key: "close", variant: "ghost", onClick: p.onClose }, "Close")
+    ]
+  },
+    h("div", { style: { marginBottom: 14 } },
+      h("label", { style: { fontSize: 11, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 } }, "SUBJECT"),
+      h("input", { ref: subRef, defaultValue: p.email.subject, style: {
+        width: "100%", padding: "10px 12px", background: C.bg2, border: "1px solid " + C.border2, borderRadius: 7, color: C.text, fontSize: 14
+      } })
+    ),
+    h("div", null,
+      h("label", { style: { fontSize: 11, color: C.muted, fontWeight: 600, display: "block", marginBottom: 6 } }, "BODY"),
+      h("textarea", { ref: bodyRef, defaultValue: p.email.body, style: {
+        width: "100%", height: 260, padding: "12px 14px", background: C.bg2, border: "1px solid " + C.border2, borderRadius: 7, color: C.text, fontSize: 13, lineHeight: 1.6, resize: "vertical", fontFamily: "'Outfit',sans-serif"
+      } })
+    )
+  );
+}
+
+function ProposalModal(p) {
+  return h(ModalWrap, { title: "Proposal \u2014 " + p.biz.name, width: 750, onClose: p.onClose,
+    footer: [
+      h(Btn, { key: "copy", variant: "green", onClick: function() {
+        navigator.clipboard.writeText(p.proposal.proposal);
+        p.onLog("Proposal copied", "success");
+      } }, "Copy"),
+      h(Btn, { key: "close", variant: "ghost", onClick: p.onClose }, "Close")
+    ]
+  },
+    h("div", { style: { display: "flex", gap: 14, marginBottom: 18 } },
+      h("div", { style: { flex: 1, background: C.bg2, borderRadius: 10, padding: 16, border: "1px solid " + C.border } },
+        h("div", { style: { fontSize: 11, color: C.muted, marginBottom: 4, fontFamily: "JetBrains Mono,monospace" } }, "RECOMMENDED PACKAGE"),
+        h("div", { style: { fontSize: 20, fontWeight: 700, color: C.green } }, p.proposal.recommendedPackage)
+      ),
+      h("div", { style: { flex: 1, background: C.bg2, borderRadius: 10, padding: 16, border: "1px solid " + C.border } },
+        h("div", { style: { fontSize: 11, color: C.muted, marginBottom: 4, fontFamily: "JetBrains Mono,monospace" } }, "ESTIMATED PRICE"),
+        h("div", { style: { fontSize: 20, fontWeight: 700, color: C.amber } }, "\u20ac" + p.proposal.totalEstimate)
+      )
+    ),
+    h("div", { style: { whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.7, color: C.text } }, p.proposal.proposal)
+  );
+}
+
+// ── Main App ────────────────────────────────────────────────────────────────
+
+function App() {
+  var _leads     = useState([]);      var leads = _leads[0];         var setLeads = _leads[1];
+  var _area      = useState("Rajec, Slovakia"); var area = _area[0]; var setArea = _area[1];
+  var _scanning  = useState(false);   var scanning = _scanning[0];   var setScanning = _scanning[1];
+  var _scanEngine= useState(null);    var scanEngine = _scanEngine[0]; var setScanEngine = _scanEngine[1];
+  var _logs      = useState([]);      var logs = _logs[0];           var setLogs = _logs[1];
+  var _filter    = useState("all");   var filter = _filter[0];       var setFilter = _filter[1];
+  var _cats      = useState({});      var cats = _cats[0];           var setCats = _cats[1];
+  var _modal     = useState(null);    var modal = _modal[0];         var setModal = _modal[1];
+  var _modalData = useState(null);    var modalData = _modalData[0]; var setModalData = _modalData[1];
+  var _modalBiz  = useState(null);    var modalBiz = _modalBiz[0];   var setModalBiz = _modalBiz[1];
+  var _err       = useState(null);    var err = _err[0];             var setErr = _err[1];
+
+  var addLog = useCallback(function(msg, type) {
+    type = type || "info";
+    setLogs(function(p) { return [{ msg: msg, type: type, time: new Date().toLocaleTimeString("sk", { hour12: false }) }].concat(p).slice(0, 300); });
+  }, []);
+
+  function updLead(id, patch) {
+    setLeads(function(p) { return p.map(function(b) { return b.id === id ? Object.assign({}, b, patch) : b; }); });
+  }
+
+  // ── Scan ────────────────────────────────────────────────────────────────
+
+  async function doScan(engine) {
+    if (!area.trim()) { setErr("Enter an area first"); return; }
+    setErr(null); setScanning(true); setScanEngine(engine);
+    addLog("Starting scan (" + engine + ") for: " + area, "system");
+
+    try {
+      var selectedCats = Object.keys(cats).filter(function(k) { return cats[k]; });
+      var t0 = Date.now();
+      var data = await apiPost("/api/scan", { area: area, categories: selectedCats.length ? selectedCats : undefined });
+      var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      addLog("Scan returned " + data.count + " businesses in " + elapsed + "s", "success");
+
+      var now = new Date().toISOString();
+      var newLeads = (data.leads || []).map(function(b, i) {
+        return Object.assign({}, b, {
+          id: "biz-" + Date.now() + "-" + i,
+          status: (!b.hasWebsite || b.websiteScore < 50) ? "needs-site" : "new",
+          foundBy: [engine === "both" ? "claude" : engine, engine === "both" ? "gemini" : null].filter(Boolean),
+          generatedHtml: null, savedToDb: false, createdAt: now,
+          _emailLoading: false, _proposalLoading: false, _saving: false
+        });
+      });
+
+      setLeads(function(prev) {
+        var exist = {};
+        prev.forEach(function(b) { exist[b.name.toLowerCase().trim()] = true; });
+        var fresh = newLeads.filter(function(b) { return !exist[b.name.toLowerCase().trim()]; });
+        addLog("Added " + fresh.length + " new leads (" + (newLeads.length - fresh.length) + " duplicates skipped)", "success");
+        return fresh.concat(prev);
+      });
+    } catch (ex) {
+      setErr(ex.message); addLog("Scan error: " + ex.message, "error");
+    }
+    setScanning(false); setScanEngine(null);
+  }
+
+  // ── Generate website ────────────────────────────────────────────────────
+
+  async function doGenerate(biz) {
+    updLead(biz.id, { status: "generating" });
+    addLog("Generating website for " + biz.name + "...", "info");
+
+    try {
+      var data = await apiPost("/api/generate", {
+        business: { name: biz.name, category: biz.category, address: biz.address, phone: biz.phone, websiteIssues: biz.websiteIssues }
+      });
+      updLead(biz.id, { status: "generated", generatedHtml: data.html });
+      addLog("Website generated for " + biz.name + " (" + (data.sections || []).join(", ") + ")", "success");
+    } catch (ex) {
+      updLead(biz.id, { status: "needs-site" });
+      addLog("Generate failed: " + ex.message, "error");
+    }
+  }
+
+  // ── Draft email ─────────────────────────────────────────────────────────
+
+  async function doEmail(biz) {
+    updLead(biz.id, { _emailLoading: true });
+    addLog("Drafting email for " + biz.name + "...", "info");
+
+    try {
+      var data = await apiPost("/api/email", {
+        business: { name: biz.name, category: biz.category, website: biz.website, websiteScore: biz.websiteScore, websiteIssues: biz.websiteIssues }
+      });
+      updLead(biz.id, { _emailLoading: false, status: "emailed" });
+      addLog("Email drafted for " + biz.name, "success");
+      setModalBiz(biz); setModalData(data); setModal("email");
+    } catch (ex) {
+      updLead(biz.id, { _emailLoading: false });
+      addLog("Email draft failed: " + ex.message, "error");
+    }
+  }
+
+  // ── Proposal ────────────────────────────────────────────────────────────
+
+  async function doProposal(biz) {
+    updLead(biz.id, { _proposalLoading: true });
+    addLog("Creating proposal for " + biz.name + "...", "info");
+
+    try {
+      var data = await apiPost("/api/proposal", {
+        business: { name: biz.name, category: biz.category, websiteScore: biz.websiteScore, websiteIssues: biz.websiteIssues }
+      });
+      updLead(biz.id, { _proposalLoading: false, status: "proposal" });
+      addLog("Proposal ready for " + biz.name + " \u2014 " + data.recommendedPackage + " \u20ac" + data.totalEstimate, "success");
+      setModalBiz(biz); setModalData(data); setModal("proposal");
+    } catch (ex) {
+      updLead(biz.id, { _proposalLoading: false });
+      addLog("Proposal failed: " + ex.message, "error");
+    }
+  }
+
+  // ── Save to DB ──────────────────────────────────────────────────────────
+
+  async function doSave(biz) {
+    updLead(biz.id, { _saving: true });
+    addLog("Saving " + biz.name + " to database...", "info");
+
+    try {
+      await apiPost("/api/leads", {
+        name: biz.name, category: biz.category, address: biz.address, phone: biz.phone,
+        website: biz.website, has_website: biz.hasWebsite, website_score: biz.websiteScore,
+        website_issues: biz.websiteIssues, area: area
+      });
+      updLead(biz.id, { _saving: false, savedToDb: true, status: "saved" });
+      addLog(biz.name + " saved to database", "success");
+    } catch (ex) {
+      updLead(biz.id, { _saving: false });
+      addLog("Save failed: " + ex.message, "error");
+    }
+  }
+
+  // ── Download ────────────────────────────────────────────────────────────
+
+  function doDownload(biz) {
+    if (!biz.generatedHtml) return;
+    var blob = new Blob([biz.generatedHtml], { type: "text/html" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = biz.name.replace(/\s+/g, "_") + ".html"; a.click();
+    URL.revokeObjectURL(url); addLog("Downloaded: " + biz.name, "success");
+  }
+
+  // ── Bulk actions ────────────────────────────────────────────────────────
+
+  async function bulkGenerate() {
+    var targets = leads.filter(function(b) { return b.websiteScore < 60 && !b.generatedHtml && b.status !== "generating"; });
+    addLog("Bulk generate: " + targets.length + " sites", "system");
+    for (var i = 0; i < targets.length; i++) { await doGenerate(targets[i]); }
+  }
+
+  async function bulkEmail() {
+    var targets = leads.filter(function(b) { return b.status !== "emailed"; });
+    addLog("Bulk email: " + targets.length + " leads", "system");
+    for (var i = 0; i < targets.length; i++) { await doEmail(targets[i]); }
+  }
+
+  async function bulkSave() {
+    var targets = leads.filter(function(b) { return !b.savedToDb; });
+    addLog("Bulk save: " + targets.length + " leads", "system");
+    for (var i = 0; i < targets.length; i++) { await doSave(targets[i]); }
+  }
+
+  // ── Filtering ───────────────────────────────────────────────────────────
+
+  var stats = {
+    total: leads.length,
+    hot: leads.filter(function(b) { return b.websiteScore < 30; }).length,
+    warm: leads.filter(function(b) { return b.websiteScore >= 30 && b.websiteScore < 60; }).length,
+    gen: leads.filter(function(b) { return !!b.generatedHtml; }).length,
+    emailed: leads.filter(function(b) { return b.status === "emailed"; }).length
+  };
+
+  var filterTabs = [
+    { k: "all", label: "All", count: stats.total },
+    { k: "hot", label: "Hot Leads", count: stats.hot },
+    { k: "warm", label: "Warm", count: stats.warm },
+    { k: "generated", label: "Generated", count: stats.gen },
+    { k: "emailed", label: "Emailed", count: stats.emailed }
+  ];
+
+  var shown = leads.filter(function(b) {
+    if (filter === "hot") return b.websiteScore < 30;
+    if (filter === "warm") return b.websiteScore >= 30 && b.websiteScore < 60;
+    if (filter === "generated") return !!b.generatedHtml;
+    if (filter === "emailed") return b.status === "emailed";
+    return true;
+  });
+
+  // ── Render ──────────────────────────────────────────────────────────────
+
+  return h("div", { style: { display: "flex", flexDirection: "column", height: "100vh" } },
+
+    // ── Topbar
+    h("div", { style: { height: 54, background: C.bg1, borderBottom: "1px solid " + C.border, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", flexShrink: 0 } },
+      h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+        h("div", { style: { width: 30, height: 30, background: C.green, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" } },
+          h("span", { style: { color: C.bg0, fontSize: 15, fontWeight: 700 } }, "W")
+        ),
+        h("span", { style: { fontWeight: 700, fontSize: 17, letterSpacing: "-0.4px" } }, "WebLead Scout"),
+        scanning ? h("span", { style: { fontSize: 11, color: C.amber, fontFamily: "JetBrains Mono,monospace", display: "flex", alignItems: "center", gap: 6, marginLeft: 12 } }, h("span", { className: "spinner", style: { borderTopColor: C.amber, width: 10, height: 10 } }), "Scanning with " + (scanEngine || "AI") + "...") : null
+      ),
+      h("div", { style: { display: "flex", gap: 8 } },
+        leads.length > 0 ? h(Btn, { variant: "ghost", small: true, onClick: bulkGenerate }, "Generate All") : null,
+        leads.length > 0 ? h(Btn, { variant: "ghost", small: true, onClick: bulkEmail }, "Email All") : null,
+        leads.length > 0 ? h(Btn, { variant: "ghost", small: true, onClick: bulkSave }, "Save All") : null
+      )
+    ),
+
+    h("div", { style: { display: "flex", flex: 1, overflow: "hidden" } },
+
+      // ── Sidebar
+      h("aside", { style: { width: 270, background: C.bg1, borderRight: "1px solid " + C.border, padding: 16, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 } },
+
+        // Area input
+        h("div", null,
+          h("label", { style: { fontSize: 10, color: C.dim, display: "block", marginBottom: 6, letterSpacing: "0.08em", fontFamily: "JetBrains Mono,monospace" } }, "TARGET AREA"),
+          h("input", { value: area, onChange: function(e) { setArea(e.target.value); }, onKeyDown: function(e) { if (e.key === "Enter" && !scanning) doScan("claude"); },
+            placeholder: "Rajec, Slovakia", style: { width: "100%", padding: "9px 11px", background: C.bg3, border: "1px solid " + C.border2, borderRadius: 8, color: C.text } })
+        ),
+
+        // Scan buttons
+        h("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+          h(Btn, { variant: "green", disabled: scanning || !area.trim(), onClick: function() { doScan("claude"); } },
+            scanning && scanEngine === "claude" ? [h("span", { key: "s", className: "spinner", style: { borderTopColor: C.bg0 } }), "Scanning..."] : "\u25b6 Scan with Claude"
+          ),
+          h(Btn, { variant: "blue", disabled: scanning || !area.trim(), onClick: function() { doScan("gemini"); } },
+            scanning && scanEngine === "gemini" ? [h("span", { key: "s", className: "spinner", style: { borderTopColor: C.bg0 } }), "Scanning..."] : "\u25b6 Scan with Gemini"
+          ),
+          h(Btn, { variant: "purple", disabled: scanning || !area.trim(), onClick: function() { doScan("both"); } },
+            scanning && scanEngine === "both" ? [h("span", { key: "s", className: "spinner", style: { borderTopColor: "#fff" } }), "Scanning..."] : "\u25b6 Scan Both"
+          )
+        ),
+
+        err ? h("div", { style: { fontSize: 11, color: C.red, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: 6, padding: "7px 10px" } }, err) : null,
+
+        // Categories
+        h("div", null,
+          h("label", { style: { fontSize: 10, color: C.dim, display: "block", marginBottom: 8, letterSpacing: "0.08em", fontFamily: "JetBrains Mono,monospace" } }, "CATEGORIES"),
+          h("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+            CATEGORIES.map(function(cat) {
+              return h("label", { key: cat.key, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: cats[cat.key] ? C.text : C.muted, cursor: "pointer", padding: "3px 0" } },
+                h("input", { type: "checkbox", checked: !!cats[cat.key], onChange: function() { setCats(function(p) { var n = Object.assign({}, p); n[cat.key] = !n[cat.key]; return n; }); }, style: { accentColor: C.green } }),
+                cat.label
+              );
+            })
+          )
+        ),
+
+        // Stats
+        h("div", null,
+          h("label", { style: { fontSize: 10, color: C.dim, display: "block", marginBottom: 8, letterSpacing: "0.08em", fontFamily: "JetBrains Mono,monospace" } }, "OVERVIEW"),
+          h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 } },
+            [
+              { label: "Total", val: stats.total, color: C.text },
+              { label: "Hot", val: stats.hot, color: C.red },
+              { label: "Warm", val: stats.warm, color: C.amber },
+              { label: "Generated", val: stats.gen, color: C.emerald }
+            ].map(function(s) {
+              return h("div", { key: s.label, style: { background: C.bg2, border: "1px solid " + C.border, borderRadius: 8, padding: "9px 11px" } },
+                h("div", { style: { fontSize: 20, fontWeight: 700, color: s.color, fontFamily: "JetBrains Mono,monospace", lineHeight: 1 } }, s.val),
+                h("div", { style: { fontSize: 10, color: C.dim, marginTop: 3 } }, s.label)
+              );
+            })
+          )
+        ),
+
+        // Filter tabs
+        h("div", null,
+          h("label", { style: { fontSize: 10, color: C.dim, display: "block", marginBottom: 8, letterSpacing: "0.08em", fontFamily: "JetBrains Mono,monospace" } }, "FILTER"),
+          filterTabs.map(function(f) {
+            var active = filter === f.k;
+            return h("button", { key: f.k, onClick: function() { setFilter(f.k); }, style: {
+              display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "8px 10px", borderRadius: 7, fontSize: 13, marginBottom: 2,
+              border: active ? "1px solid rgba(0,212,170,0.25)" : "1px solid transparent",
+              background: active ? "rgba(0,212,170,0.06)" : "transparent", color: active ? C.green : C.muted, textAlign: "left", cursor: "pointer"
+            } },
+              h("span", null, f.label),
+              h("span", { style: { background: C.bg3, borderRadius: 4, padding: "1px 6px", fontSize: 10, fontFamily: "JetBrains Mono,monospace", color: C.dim } }, f.count)
+            );
+          })
+        )
+      ),
+
+      // ── Main content
+      h("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } },
+
+        // Cards
+        h("main", { style: { flex: 1, overflowY: "auto", padding: 18 } },
+          leads.length === 0
+            ? h("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, textAlign: "center" } },
+                h("div", { style: { fontSize: 48, opacity: 0.3 } }, "\ud83d\udd0d"),
+                h("div", { style: { fontSize: 16, fontWeight: 500, color: C.dim } }, "No leads yet"),
+                h("div", { style: { fontSize: 13, color: C.faint } }, "Hit a Scan button to search " + area)
+              )
+            : h("div", null,
+                scanning ? h("div", { style: { background: "rgba(129,140,248,0.06)", border: "1px solid rgba(129,140,248,0.15)", borderRadius: 10, padding: "10px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 } },
+                  h("span", { className: "spinner", style: { borderTopColor: C.purple } }),
+                  h("span", { style: { fontSize: 13, color: C.purple } }, "Scanning " + area + " with " + (scanEngine || "AI") + "...")
+                ) : null,
+                h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(310px,1fr))", gap: 14 } },
+                  shown.map(function(biz) {
+                    return h(BizCard, { key: biz.id, biz: biz,
+                      onGenerate: doGenerate, onPreview: function(b) { setModalBiz(b); setModal("preview"); },
+                      onDownload: doDownload, onEmail: doEmail, onProposal: doProposal, onSave: doSave
+                    });
+                  })
+                ),
+                shown.length === 0 && leads.length > 0 ? h("div", { style: { textAlign: "center", color: C.faint, padding: 40, fontSize: 13 } }, "No businesses match this filter") : null
+              )
+        ),
+
+        // Log
+        h(LogPanel, { logs: logs, onClear: function() { setLogs([]); } })
+      )
+    ),
+
+    // ── Modals
+    modal === "preview" && modalBiz && modalBiz.generatedHtml ? h(PreviewModal, { biz: modalBiz, onClose: function() { setModal(null); } }) : null,
+    modal === "email" && modalBiz && modalData ? h(EmailModal, { biz: modalBiz, email: modalData, onLog: addLog, onClose: function() { setModal(null); } }) : null,
+    modal === "proposal" && modalBiz && modalData ? h(ProposalModal, { biz: modalBiz, proposal: modalData, onLog: addLog, onClose: function() { setModal(null); } }) : null
+  );
+}
+
+// ── Mount ───────────────────────────────────────────────────────────────────
+ReactDOM.createRoot(document.getElementById("app")).render(h(App, null));
+</script>
+</body>
+</html>
